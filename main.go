@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,14 +16,15 @@ import (
 )
 
 var (
-	vaultAddr string
-	roleID    string
-	secretID  string
-	vaultPath string
-	cronExpr  string
-	certsPath string
-	token     string
-	tokenMu   sync.Mutex
+	vaultAddr      string
+	roleID         string
+	secretID       string
+	vaultPath      string
+	cronExpr       string
+	certPath       string
+	privateKeyPath string
+	token          string
+	tokenMu        sync.Mutex
 )
 
 type AppRoleLoginRequest struct {
@@ -51,9 +53,10 @@ func loadEnv() {
 	secretID = os.Getenv("VAULT_SECRET_ID")
 	vaultPath = os.Getenv("VAULT_PATH")
 	cronExpr = os.Getenv("CRON_SCHEDULE")
-	certsPath = os.Getenv("CERTS_PATH")
+	certPath = os.Getenv("CERT_PATH")
+	privateKeyPath = os.Getenv("PRIVATE_KEY_PATH")
 
-	if vaultAddr == "" || roleID == "" || secretID == "" || vaultPath == "" || cronExpr == "" || certsPath == "" {
+	if vaultAddr == "" || roleID == "" || secretID == "" || vaultPath == "" || cronExpr == "" || certPath == "" {
 		log.Fatal("Missing required environment variables")
 	}
 }
@@ -71,9 +74,14 @@ func loginToVault() error {
 		return fmt.Errorf("failed to authenticate with Vault, status: %d", resp.StatusCode)
 	}
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error reading login response: %v", err)
+	}
+
 	var loginResp AppRoleLoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
-		return err
+	if err := json.Unmarshal(bodyBytes, &loginResp); err != nil {
+		return fmt.Errorf("failed to parse Vault login response: %v", err)
 	}
 
 	tokenMu.Lock()
@@ -91,7 +99,12 @@ func fetchSSLCerts() error {
 		if err := loginToVault(); err != nil {
 			return fmt.Errorf("failed to login to Vault: %v", err)
 		}
+		tokenMu.Lock()
+		currentToken = token // Update after login
+		tokenMu.Unlock()
 	}
+
+	fmt.Print("current token:" + currentToken)
 
 	url := fmt.Sprintf("%s/v1/%s", vaultAddr, vaultPath)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -113,14 +126,14 @@ func fetchSSLCerts() error {
 		return err
 	}
 
-	certPEM, ok1 := vaultResp.Data.Data["certificate"]
-	keyPEM, ok2 := vaultResp.Data.Data["private_key"]
+	certPEM, ok1 := vaultResp.Data.Data["tls.crt"]
+	keyPEM, ok2 := vaultResp.Data.Data["tls.key"]
 	if !ok1 || !ok2 {
 		return fmt.Errorf("missing certificate or private key in Vault response")
 	}
 
-	certPath := filepath.Join(certsPath, "tls.crt")
-	keyPath := filepath.Join(certsPath, "tls.key")
+	certPath := filepath.Join(certPath)
+	keyPath := filepath.Join(privateKeyPath)
 
 	if err := os.WriteFile(certPath, []byte(certPEM), 0644); err != nil {
 		return err
@@ -129,7 +142,7 @@ func fetchSSLCerts() error {
 		return err
 	}
 
-	log.Println("SSL certificate and key updated successfully in", certsPath)
+	log.Println("SSL certificate and key updated successfully in", certPath+" and "+privateKeyPath)
 	return nil
 }
 

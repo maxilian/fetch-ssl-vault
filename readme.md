@@ -9,6 +9,7 @@ The idea behind this code is I need a script that can fetch SSL certificate whic
 
 - The certificate must include private key stored in Vault secret and it's named with tls.crt for the cert and tls.key for the private key.
 - You must fill the `.env` and provide approle `role_id` and `secret_id`.
+- the schedule is in crontab format, you can use something like `0 1 * * 1` for example to run every Monday at 1AM UTC.
 
 ```
 mv .env.dev .env

@@ -104,7 +104,7 @@ func fetchSSLCerts() error {
 		tokenMu.Unlock()
 	}
 
-	fmt.Print("current token:" + currentToken)
+	fmt.Println("current token:" + currentToken)
 
 	url := fmt.Sprintf("%s/v1/%s", vaultAddr, vaultPath)
 	req, _ := http.NewRequest("GET", url, nil)

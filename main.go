@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -24,6 +26,8 @@ var (
 	certPath       string
 	privateKeyPath string
 	token          string
+	nginxWindows   string
+	restartNginx   string
 	tokenMu        sync.Mutex
 )
 
@@ -55,6 +59,8 @@ func loadEnv() {
 	cronExpr = os.Getenv("CRON_SCHEDULE")
 	certPath = os.Getenv("CERT_PATH")
 	privateKeyPath = os.Getenv("PRIVATE_KEY_PATH")
+	nginxWindows = os.Getenv("NGINX_SERVICE_WINDOWS")
+	restartNginx = os.Getenv("RESTART_NGINX")
 
 	if vaultAddr == "" || roleID == "" || secretID == "" || vaultPath == "" || cronExpr == "" || certPath == "" {
 		log.Fatal("Missing required environment variables")
@@ -146,18 +152,48 @@ func fetchSSLCerts() error {
 	return nil
 }
 
+func restartNginxServer() error {
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", "sc stop "+nginxWindows+" && "+"sc start "+nginxWindows)
+
+	} else {
+		cmd = exec.Command("sudo", "systemctl", "restart", "nginx")
+	}
+
+	err := cmd.Run()
+	return err
+}
+
 func main() {
 	loadEnv()
 	log.Println("Starting SSL cert fetcher...")
 
 	if err := fetchSSLCerts(); err != nil {
-		log.Println("Error fetching SSL certs on startup:", err)
+		log.Println("Error fetching SSL certs on startup: s", err)
+	}
+
+	if restartNginx == "true" {
+		if err := restartNginxServer(); err != nil {
+			log.Println("Error restarting nginx: ", err)
+
+		}
+
 	}
 
 	c := cron.New()
 	c.AddFunc(cronExpr, func() {
 		if err := fetchSSLCerts(); err != nil {
-			log.Println("Error fetching SSL certs:", err)
+			log.Println("Error fetching SSL certs: ", err)
+		}
+
+		if restartNginx == "true" {
+			if err := restartNginxServer(); err != nil {
+				log.Println("Error restarting nginx: ", err)
+
+			}
+
 		}
 	})
 	c.Start()
